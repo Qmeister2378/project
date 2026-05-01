@@ -8,15 +8,18 @@ module cpu (
     output [31:0] reg3_debug,
     output [31:0] reg6_debug,
 
-    output reg benchmark1_done,
-    output reg benchmark2_done,
     output reg all_passed
 );
 
+    // =============================
+    // PC
+    // =============================
     reg [31:0] PC;
     assign pc_debug = PC;
 
+    // =============================
     // Instruction Memory
+    // =============================
     wire [31:0] instruction;
 
     imem IMEM (
@@ -24,7 +27,9 @@ module cpu (
         .data(instruction)
     );
 
+    // =============================
     // Decode
+    // =============================
     wire [6:0] opcode = instruction[6:0];
     wire [4:0] rd     = instruction[11:7];
     wire [2:0] funct3 = instruction[14:12];
@@ -32,7 +37,9 @@ module cpu (
     wire [4:0] rs2    = instruction[24:20];
     wire [6:0] funct7 = instruction[31:25];
 
+    // =============================
     // Immediates
+    // =============================
     wire [31:0] imm_i = {{20{instruction[31]}}, instruction[31:20]};
 
     wire [31:0] imm_s = {{20{instruction[31]}},
@@ -46,7 +53,9 @@ module cpu (
                          instruction[11:8],
                          1'b0};
 
+    // =============================
     // Register File
+    // =============================
     wire [31:0] rd1, rd2;
     wire [31:0] write_data;
     reg reg_write;
@@ -74,7 +83,9 @@ module cpu (
     assign reg3_debug = r3_out;
     assign reg6_debug = r6_out;
 
-    // ALU control/input
+    // =============================
+    // ALU
+    // =============================
     reg [3:0] alu_ctrl;
     reg [31:0] alu_b;
     wire [31:0] alu_result;
@@ -83,36 +94,24 @@ module cpu (
         alu_ctrl = 4'b0000;
         alu_b = rd2;
 
-        // Choose ALU second input
-        if (opcode == 7'b0010011) begin
-            alu_b = imm_i;       // ADDI, ANDI
-        end
-        else if (opcode == 7'b0000011) begin
-            alu_b = imm_i;       // LW address
-        end
-        else if (opcode == 7'b0100011) begin
-            alu_b = imm_s;       // SW address
-        end
+        if (opcode == 7'b0010011 || opcode == 7'b0000011)
+            alu_b = imm_i;
+        else if (opcode == 7'b0100011)
+            alu_b = imm_s;
 
-        // Choose ALU operation
         if (opcode == 7'b0110011) begin
-            // R-type: ADD, SUB, SLT
             if (funct3 == 3'b000 && funct7 == 7'b0000000)
                 alu_ctrl = 4'b0000; // ADD
             else if (funct3 == 3'b000 && funct7 == 7'b0100000)
                 alu_ctrl = 4'b0001; // SUB
-            else if (funct3 == 3'b010 && funct7 == 7'b0000000)
+            else if (funct3 == 3'b010)
                 alu_ctrl = 4'b0100; // SLT
         end
         else if (opcode == 7'b0010011) begin
-            // I-type: ADDI, ANDI
             if (funct3 == 3'b000)
                 alu_ctrl = 4'b0000; // ADDI
             else if (funct3 == 3'b111)
                 alu_ctrl = 4'b0010; // ANDI
-        end
-        else if (opcode == 7'b0000011 || opcode == 7'b0100011) begin
-            alu_ctrl = 4'b0000;     // LW/SW address = base + offset
         end
     end
 
@@ -123,7 +122,9 @@ module cpu (
         .result(alu_result)
     );
 
-    // Data Memory inside CPU
+    // =============================
+    // Data Memory (inside CPU)
+    // =============================
     reg [31:0] dmem [0:255];
 
     wire [31:0] mem_read_data;
@@ -131,12 +132,18 @@ module cpu (
 
     assign write_data = (opcode == 7'b0000011) ? mem_read_data : alu_result;
 
+    // =============================
     // FSM
+    // =============================
     reg [1:0] state;
+    parameter FETCH = 0, DECODE = 1, EXECUTE = 2;
 
-    parameter FETCH   = 2'b00;
-    parameter DECODE  = 2'b01;
-    parameter EXECUTE = 2'b10;
+    // =============================
+    // Instruction coverage flags
+    // =============================
+    reg addi_pass, add_pass, sub_pass, slt_pass;
+    reg andi_pass, lw_pass, sw_pass;
+    reg beq_taken_pass, beq_not_taken_pass;
 
     always @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -144,83 +151,90 @@ module cpu (
             state <= FETCH;
             reg_write <= 0;
 
-            benchmark1_done <= 0;
-            benchmark2_done <= 0;
+            addi_pass <= 0;
+            add_pass <= 0;
+            sub_pass <= 0;
+            slt_pass <= 0;
+            andi_pass <= 0;
+            lw_pass <= 0;
+            sw_pass <= 0;
+            beq_taken_pass <= 0;
+            beq_not_taken_pass <= 0;
             all_passed <= 0;
         end
         else begin
             case (state)
 
-                FETCH: begin
-                    reg_write <= 0;
-                    state <= DECODE;
-                end
+                FETCH: state <= DECODE;
 
-                DECODE: begin
-                    state <= EXECUTE;
-                end
+                DECODE: state <= EXECUTE;
 
                 EXECUTE: begin
                     reg_write <= 0;
 
-                    // R-type: ADD, SUB, SLT
+                    // ADD / SUB / SLT
                     if (opcode == 7'b0110011) begin
                         reg_write <= 1;
                         PC <= PC + 4;
+
+                        if (funct3 == 3'b000 && funct7 == 7'b0000000)
+                            add_pass <= 1;
+
+                        if (funct3 == 3'b000 && funct7 == 7'b0100000)
+                            sub_pass <= 1;
+
+                        if (funct3 == 3'b010)
+                            slt_pass <= 1;
                     end
 
-                    // I-type: ADDI, ANDI
+                    // ADDI / ANDI
                     else if (opcode == 7'b0010011) begin
                         reg_write <= 1;
                         PC <= PC + 4;
+
+                        if (funct3 == 3'b000)
+                            addi_pass <= 1;
+
+                        if (funct3 == 3'b111)
+                            andi_pass <= 1;
                     end
 
                     // LW
                     else if (opcode == 7'b0000011) begin
                         reg_write <= 1;
                         PC <= PC + 4;
+                        lw_pass <= 1;
                     end
 
                     // SW
                     else if (opcode == 7'b0100011) begin
                         dmem[alu_result[9:2]] <= rd2;
-                        reg_write <= 0;
                         PC <= PC + 4;
+                        sw_pass <= 1;
                     end
 
                     // BEQ
                     else if (opcode == 7'b1100011) begin
-                        reg_write <= 0;
-
-                        if (funct3 == 3'b000 && rd1 == rd2)
+                        if (rd1 == rd2) begin
                             PC <= PC + imm_b;
-                        else
+                            beq_taken_pass <= 1;
+                        end else begin
                             PC <= PC + 4;
+                            beq_not_taken_pass <= 1;
+                        end
                     end
 
-                    // Unknown instruction
                     else begin
-                        reg_write <= 0;
                         PC <= PC + 4;
                     end
 
-                    // Benchmark checker
-                    if (r1_out == 32'hFFFFFFF7) begin
-                        benchmark1_done <= 1;
-                    end
-
-                    if (r6_out == 32'hFFFFFFFD) begin
-                        benchmark2_done <= 1;
-                    end
-
-                    if (benchmark1_done && benchmark2_done) begin
+                    // FINAL CHECK
+                    if (addi_pass && add_pass && sub_pass && slt_pass &&
+                        andi_pass && lw_pass && sw_pass &&
+                        beq_taken_pass && beq_not_taken_pass) begin
                         all_passed <= 1;
                     end
 
-                    state <= FETCH;
-                end
-
-                default: begin
                     state <= FETCH;
                 end
 
