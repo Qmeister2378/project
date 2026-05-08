@@ -16,15 +16,15 @@ module cpu_top (
 
     reg [25:0] counter;
 
-    always @(posedge CLOCK_50 or posedge rst) begin
-        if (rst)
-            counter <= 26'd0;
-        else
-            counter <= counter + 26'd1;
-    end
+always @(posedge CLOCK_50 or posedge rst) begin
+    if (rst)
+        counter <= 26'd0;
+    else
+        counter <= counter + 26'd1;
+end
 
-    wire slow_clk;
-    assign slow_clk = counter[25];
+
+    wire slow_clk = counter[23];
 
     wire [31:0] pc;
     wire [31:0] debug_data;
@@ -34,18 +34,19 @@ module cpu_top (
         .clk(slow_clk),
         .reset(rst),
         .mem_select(mem_select),
+
         .debug_reg(selected_reg),
         .debug_data(debug_data),
+
         .pc_debug(pc),
         .all_passed(all_passed)
     );
 
-    
     wire [31:0] display_value;
+
     assign display_value = (SW[8] == 1'b1) ? pc : debug_data;
 
     assign LEDR[8:0] = display_value[8:0];
-
     assign LEDR[9] = all_passed;
 
     seg7 S0 (
