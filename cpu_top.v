@@ -8,45 +8,46 @@ module cpu_top (
 );
 
     wire rst = ~KEY[3];
-	 wire mem_select = SW[7];
+
+    wire mem_select = SW[7];
+
+    wire [4:0] selected_reg;
+    assign selected_reg = SW[4:0];
 
     reg [25:0] counter;
 
     always @(posedge CLOCK_50 or posedge rst) begin
         if (rst)
-            counter <= 0;
+            counter <= 26'd0;
         else
-            counter <= counter + 1;
+            counter <= counter + 26'd1;
     end
 
-    wire slow_clk = counter[25];
+    wire slow_clk;
+    assign slow_clk = counter[25];
 
     wire [31:0] pc;
     wire [31:0] debug_data;
     wire all_passed;
 
-    wire [4:0] selected_reg;
-    assign selected_reg = SW[4:0];
-
     cpu CPU (
-    .clk(slow_clk),
-    .reset(rst),
-    .mem_select(mem_select),
+        .clk(slow_clk),
+        .reset(rst),
+        .mem_select(mem_select),
+        .debug_reg(selected_reg),
+        .debug_data(debug_data),
+        .pc_debug(pc),
+        .all_passed(all_passed)
+    );
 
-    .debug_reg(selected_reg),
-    .debug_data(debug_data),
-    .pc_debug(pc),
-    .all_passed(all_passed)
-);
-
+    
     wire [31:0] display_value;
-	 assign display_value = (SW[8] == 1'b1) ? pc : debug_data;
-	 
+    assign display_value = (SW[8] == 1'b1) ? pc : debug_data;
+
     assign LEDR[8:0] = display_value[8:0];
 
     assign LEDR[9] = all_passed;
 
-    // HEX0 and HEX1 show low byte of selected value
     seg7 S0 (
         .value(display_value[3:0]),
         .o(HEX0)
@@ -56,8 +57,5 @@ module cpu_top (
         .value(display_value[7:4]),
         .o(HEX1)
     );
-
-  
-  
 
 endmodule
